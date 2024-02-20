@@ -1,7 +1,8 @@
-import { Injectable } from "@angular/core";
+import { computed, Injectable } from "@angular/core";
 import { combineLatest, map, scan, shareReplay, Subject } from "rxjs";
 import { Vehicle } from "../vehicles/vehicle";
 import { Action, CartItem } from "./cart";
+import { toSignal } from '@angular/core/rxjs-interop';
 
 @Injectable({
   providedIn: 'root'
@@ -11,6 +12,15 @@ export class CartService {
   // Add item action
   private itemSubject = new Subject<Action<CartItem>>();
   itemAction$ = this.itemSubject.asObservable();
+  private cartItemsValue: CartItem[] = [];
+
+  private itemAction = toSignal(this.itemAction$);
+
+  cartItems = computed(() => {
+    let signalValue = this.itemAction();
+    this.cartItemsValue = this.modifyCart(this.cartItemsValue, signalValue!);
+    return this.cartItemsValue;
+  });
 
   cartItems$ = this.itemAction$
     .pipe(
@@ -20,26 +30,18 @@ export class CartService {
     );
 
   // Total up the extended price for each item
-  subTotal$ = this.cartItems$.pipe(
-    map(items => items.reduce((a, b) => a + (b.quantity * Number(b.vehicle.cost_in_credits)), 0)),
-  );
+  subTotal = computed(() => this.cartItems().reduce((a, b) => a + (b.quantity * Number(b.vehicle.cost_in_credits)), 0));
 
   // Delivery is free if spending more than 100,000 credits
-  deliveryFee$ = this.subTotal$.pipe(
-    map((t) => (t < 100000 ? 999 : 0))
-  );
+  deliveryFee = computed(() => this.subTotal() < 100000 ? 999 : 0);
 
   // Tax could be based on shipping address zip code
-  tax$ = this.subTotal$.pipe(
-    map((t) => Math.round(t * 10.75) / 100)
-  );
+  tax = computed(() => this.subTotal() * 10.75 / 100);
 
   // Total price
-  totalPrice$ = combineLatest([
-    this.subTotal$,
-    this.deliveryFee$,
-    this.tax$,
-  ]).pipe(map(([st, d, t]) => st + d + t));
+  totalPrice = computed(() => {
+     return this.subTotal() + this.deliveryFee() + this.tax()
+  });
 
   // Add the vehicle to the cart as an Action<CartItem>
   addToCart(vehicle: Vehicle): void {
